@@ -10,7 +10,8 @@ from vibe.commands.create import create
 from vibe.commands.structure import structure
 from vibe.commands.complain import complain
 from vibe.commands.check import check
-
+from vibe.commands.version import version
+from vibe.commands.sync import sync
 app = typer.Typer()
 
 commands = [
@@ -24,6 +25,8 @@ commands = [
     structure,
     complain,
     check,
+    version,
+    sync,
 ]
 
 for command in commands:
