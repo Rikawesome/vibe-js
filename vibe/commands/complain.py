@@ -9,20 +9,52 @@ from vibe.services.context import save_context
 console = Console()
 
 
-def complain(complaint: str):
-    console.print("[cyan]Listening to your suffering...[/cyan]")
+def complain():
+    console.print("[bold cyan]😭 Vibe Complain[/bold cyan]\n")
+
+    complaint = console.input(
+        "[cyan]What’s wrong?[/cyan]\n> "
+    ).strip()
+
+    console.print(
+        "\n[yellow]Paste terminal logs below.[/yellow]"
+    )
+    console.print(
+        "[dim]Type END on a new line when done."
+        " Press ENTER immediately to skip.[/dim]\n"
+    )
+
+    log_lines = []
+
+    while True:
+        line = input()
+
+        if line.strip() == "END":
+            break
+
+        if not line.strip() and not log_lines:
+            break
+
+        log_lines.append(line)
+
+    logs_text = "\n".join(log_lines)
+
+    console.print("\n[cyan]Listening to your suffering...[/cyan]")
     console.print("[cyan]Scanning project shape...[/cyan]")
 
     try:
         tree = build_tree(".", max_depth=3)
+
         save_context({
-    "complaint": complaint,
-    "tree": tree,
-})
+            "complaint": complaint,
+            "logs": logs_text,
+            "tree": tree,
+        })
 
         answer = ask_ai(
             COMPLAIN_PROMPT.format(
                 complaint=complaint,
+                logs=logs_text or "No logs provided.",
                 tree=tree,
             )
         )

@@ -10,7 +10,7 @@ from vibe.services.resolver import resolve_file
 console = Console()
 
 
-def check(file: str):
+def check(files: list[str]):
     context = load_context()
 
     if not context:
@@ -20,52 +20,62 @@ def check(file: str):
         )
         return
 
-    resolved, matches = resolve_file(file)
+    all_checks = []
 
-    if matches:
-        console.print("[yellow]Multiple matching files found:[/yellow]")
+    for file in files:
+        resolved, matches = resolve_file(file)
 
-        for match in matches:
-            console.print(f"- {match}")
+        if matches:
+            console.print(f"[yellow]Multiple matches for {file}:[/yellow]")
+            for match in matches:
+                console.print(f"- {match}")
+            continue
 
-        return
+        if not resolved:
+            console.print(f"[red]Could not find file:[/red] {file}")
+            continue
 
-    if not resolved:
-        console.print(f"[red]Could not find file:[/red] {file}")
-        return
+        code, error = read_text_file(str(resolved))
 
-    code, error = read_text_file(str(resolved))
+        if error:
+            console.print(f"[red]{error}[/red]")
+            continue
 
-    if error:
-        console.print(f"[red]{error}[/red]")
-        return
+        console.print(f"[cyan]Checking:[/cyan] {resolved}")
 
-    console.print(f"[cyan]Checking:[/cyan] {resolved}")
-
-    try:
-        answer = ask_ai(
-            CHECK_PROMPT.format(
-                complaint=context["complaint"],
-                tree=context["tree"],
-                file_path=resolved,
-                code=code,
+        try:
+            answer = ask_ai(
+                CHECK_PROMPT.format(
+                    complaint=context["complaint"],
+                    tree=context["tree"],
+                    file_path=resolved,
+                    code=code,
+                )
             )
-        )
 
-        update_context({
-            "last_check": {
+            all_checks.append({
+                "complaint": context["complaint"],
                 "file_path": str(resolved),
                 "analysis": answer,
-            }
+            })
+
+            console.print(
+                Panel(
+                    answer,
+                    title=f"🕵️ Vibe Check: {resolved}",
+                    border_style="cyan",
+                )
+            )
+
+        except Exception as e:
+            console.print(f"[red]AI Error:[/red] {e}")
+
+    if all_checks:
+        update_context({
+            "last_check": all_checks[-1],
+            "checks": all_checks,
         })
 
         console.print(
-            Panel(
-                answer,
-                title="🕵️ Vibe Check",
-                border_style="cyan",
-            )
+            f"[green]Saved {len(all_checks)} check result(s) to context.[/green]"
         )
-
-    except Exception as e:
-        console.print(f"[red]AI Error:[/red] {e}")

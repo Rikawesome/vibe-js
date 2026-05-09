@@ -1,3 +1,4 @@
+README.md
 pyproject.toml
 vibe/__init__.py
 vibe/main.py
@@ -11,13 +12,17 @@ vibe/commands/doctor.py
 vibe/commands/explain.py
 vibe/commands/fix.py
 vibe/commands/roast.py
+vibe/commands/setup.py
 vibe/commands/structure.py
+vibe/commands/sync.py
+vibe/commands/version.py
 vibe/prompts/__init__.py
 vibe/prompts/prompts.py
 vibe/services/__init__.py
 vibe/services/ai.py
 vibe/services/context.py
 vibe/services/files.py
+vibe/services/git.py
 vibe/services/resolver.py
 vibe/services/tree.py
 vibe_js.egg-info/PKG-INFO
