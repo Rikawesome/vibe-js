@@ -1,0 +1,9 @@
+.env
+venv/
+__pycache__/
+*.pyc
+.vibe/
+*.bak
+report.json
+my-api/
+my-ai-app/

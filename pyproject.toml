@@ -1,0 +1,20 @@
+[project]
+name = "vibe-js"
+version = "0.1.0"
+description = "Funny AI-powered developer CLI"
+authors = [
+    { name = "Ronald" }
+]
+dependencies = [
+    "typer",
+    "rich",
+    "python-dotenv",
+    "google-generativeai",
+]
+
+[project.scripts]
+vibe = "vibe.main:app"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"

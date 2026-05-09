@@ -1,0 +1,8 @@
+my-ai-app/
+├── backend/
+│   ├── app.py
+│   └── routes/
+├── frontend/
+│   ├── index.html
+│   └── src/
+└── README.md
