@@ -1,7 +1,7 @@
 from rich.console import Console
 from rich.panel import Panel
 import typer
-
+import re
 from vibe.prompts.prompts import MULTI_CHECK_PROMPT
 from vibe.services.ai import ask_ai
 from vibe.services.context import (
@@ -50,7 +50,30 @@ def find_score_for_file(scores: dict, file_path: str):
 
     return 0.3
 
+def find_relevant_symbols(code: str, complaint: str):
+    words = [
+        word.lower()
+        for word in complaint.replace("_", " ").replace("-", " ").split()
+        if len(word) >= 4
+    ]
 
+    symbols = set(words)
+
+    if "audio" in symbols or "autoplay" in symbols or "tts" in symbols:
+        symbols.update([
+            "audio",
+            "tts",
+            "speech",
+            "text_to_speech",
+            "stream-audio",
+            "speak",
+            "blob",
+            "play",
+            "currentAudio",
+            "edge_tts",
+        ])
+
+    return symbols
 def build_smart_context(code: str, file_path: str, complaint: str):
     if len(code) <= MAX_FILE_CHARS:
         return code
@@ -61,7 +84,7 @@ def build_smart_context(code: str, file_path: str, complaint: str):
         if len(word) >= 4
     ]
 
-    useful_keywords = set(complaint_words)
+    useful_keywords = find_relevant_symbols(code, complaint)
 
     fallback_keywords = [
         "error",
@@ -95,8 +118,8 @@ def build_smart_context(code: str, file_path: str, complaint: str):
         line_lower = line.lower()
 
         if any(keyword in line_lower for keyword in useful_keywords):
-            start = max(0, index - 8)
-            end = min(len(lines), index + 18)
+            start = max(0, index - 20)
+            end = min(len(lines), index + 35)
             selected_ranges.append((start, end))
 
     if not selected_ranges:
@@ -143,14 +166,119 @@ def build_smart_context(code: str, file_path: str, complaint: str):
     return smart_context
 
 
+def extract_routes(code: str):
+    routes = []
+
+    route_pattern = r'@router\.(get|post|put|delete|patch)\(["\']([^"\']+)["\']\)'
+
+    lines = code.splitlines()
+
+    for index, line in enumerate(lines):
+        match = re.search(route_pattern, line.strip())
+
+        if not match:
+            continue
+
+        method = match.group(1).upper()
+        path = match.group(2)
+
+        handler = "unknown_handler"
+
+        for next_line in lines[index + 1:index + 6]:
+            stripped = next_line.strip()
+
+            if stripped.startswith("async def ") or stripped.startswith("def "):
+                handler = stripped
+                break
+
+        routes.append({
+            "method": method,
+            "path": path,
+            "handler": handler,
+        })
+
+    return routes
+
+
+def extract_fetches(code: str):
+    fetches = []
+
+    fetch_pattern = r'fetch\(\s*[`"\']([^`"\']+)'
+
+    for match in re.findall(fetch_pattern, code):
+        fetches.append(match)
+
+    return fetches
+
+
+def extract_response_types(code: str):
+    response_types = []
+
+    for line in code.splitlines():
+        stripped = line.strip()
+
+        if "StreamingResponse" in stripped:
+            response_types.append(stripped)
+
+        elif "JSONResponse" in stripped:
+            response_types.append(stripped)
+
+        elif "Response(" in stripped:
+            response_types.append(stripped)
+
+        elif ".blob()" in stripped:
+            response_types.append(stripped)
+
+        elif ".json()" in stripped:
+            response_types.append(stripped)
+
+        elif "new Audio" in stripped:
+            response_types.append(stripped)
+
+        elif ".play(" in stripped:
+            response_types.append(stripped)
+
+        elif "createObjectURL" in stripped:
+            response_types.append(stripped)
+
+    return response_types
+
+
 def build_flow_map(files):
     flow_lines = []
+    all_routes = []
+    all_fetches = []
 
     for item in files:
         path = item["file_path"]
         code = item["code"]
 
+        routes = extract_routes(code)
+        fetches = extract_fetches(code)
+        responses = extract_response_types(code)
+
         flow_lines.append(f"\nFILE: {path}")
+
+        if routes:
+            flow_lines.append("BACKEND_ROUTES:")
+            for route in routes:
+                flow_lines.append(
+                    f"- {route['method']} {route['path']} -> {route['handler']}"
+                )
+                all_routes.append((path, route))
+
+        if fetches:
+            flow_lines.append("FRONTEND_FETCHES:")
+            for fetch_url in fetches:
+                flow_lines.append(f"- fetch({fetch_url})")
+                all_fetches.append((path, fetch_url))
+
+        if responses:
+            flow_lines.append("RESPONSE_AND_AUDIO_HANDLING:")
+            for response in responses:
+                flow_lines.append(f"- {response}")
+
+        important_lines = []
 
         for line in code.splitlines():
             stripped = line.strip()
@@ -159,19 +287,56 @@ def build_flow_map(files):
                 stripped.startswith("def ")
                 or stripped.startswith("async def ")
                 or stripped.startswith("function ")
-                or "=>" in stripped
-                or "fetch(" in stripped
-                or "addEventListener" in stripped
                 or ".onclick" in stripped
-                or "StreamingResponse" in stripped
-                or "Response(" in stripped
+                or "addEventListener" in stripped
                 or "text_to_speech" in stripped
                 or "audio" in stripped.lower()
-                or "play(" in stripped
-                or "blob()" in stripped
-                or "createObjectURL" in stripped
+                or "tts" in stripped.lower()
             ):
-                flow_lines.append(f"- {stripped}")
+                important_lines.append(stripped)
+
+        if important_lines:
+            flow_lines.append("IMPORTANT_FLOW_LINES:")
+            for line in important_lines[:40]:
+                flow_lines.append(f"- {line}")
+
+    if all_routes or all_fetches:
+        flow_lines.append("\nCROSS_FILE_CONNECTIONS:")
+
+        if all_fetches and all_routes:
+            for fetch_file, fetch_url in all_fetches:
+                matched = False
+
+                for route_file, route in all_routes:
+                    route_path = route["path"]
+
+                    if (
+                        fetch_url.endswith(route_path)
+                        or route_path in fetch_url
+                        or fetch_url in route_path
+                    ):
+                        flow_lines.append(
+                            f"- {fetch_file} fetch({fetch_url}) likely connects to "
+                            f"{route_file} {route['method']} {route_path}"
+                        )
+                        matched = True
+
+                if not matched:
+                    flow_lines.append(
+                        f"- {fetch_file} fetch({fetch_url}) has no obvious matching route in checked files."
+                    )
+
+        elif all_fetches:
+            for fetch_file, fetch_url in all_fetches:
+                flow_lines.append(
+                    f"- {fetch_file} fetch({fetch_url}) found, but no backend routes were checked."
+                )
+
+        elif all_routes:
+            for route_file, route in all_routes:
+                flow_lines.append(
+                    f"- {route_file} route {route['method']} {route['path']} found, but no frontend fetches were checked."
+                )
 
     return "\n".join(flow_lines)
 
