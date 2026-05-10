@@ -4,7 +4,7 @@ from rich.panel import Panel
 from vibe.prompts.prompts import COMPLAIN_PROMPT
 from vibe.services.ai import ask_ai
 from vibe.services.tree import build_tree
-from vibe.services.context import save_context
+from vibe.services.context import save_context, extract_file_paths
 
 console = Console()
 
@@ -20,8 +20,8 @@ def complain():
         "\n[yellow]Paste terminal logs below.[/yellow]"
     )
     console.print(
-        "[dim]Type END on a new line when done."
-        " Press ENTER immediately to skip.[/dim]\n"
+        "[dim]Type END on a new line when done. "
+        "Press ENTER immediately to skip.[/dim]\n"
     )
 
     log_lines = []
@@ -45,12 +45,6 @@ def complain():
     try:
         tree = build_tree(".", max_depth=3)
 
-        save_context({
-            "complaint": complaint,
-            "logs": logs_text,
-            "tree": tree,
-        })
-
         answer = ask_ai(
             COMPLAIN_PROMPT.format(
                 complaint=complaint,
@@ -58,6 +52,15 @@ def complain():
                 tree=tree,
             )
         )
+
+        suggested_files = extract_file_paths(answer)
+
+        save_context({
+            "complaint": complaint,
+            "logs": logs_text,
+            "tree": tree,
+            "suggested_files": suggested_files,
+        })
 
         console.print(
             Panel(

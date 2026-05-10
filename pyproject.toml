@@ -6,10 +6,12 @@ authors = [
     { name = "Ronald" }
 ]
 dependencies = [
-    "typer",
-    "rich",
-    "python-dotenv",
-    "google-generativeai",
+    "typer>=0.12,<0.13",
+    "click>=8.1,<8.2",
+    "rich>=13.0",
+    "groq>=0.9.0",
+    "python-dotenv>=1.0",
+    "google-genai>=2.0",
 ]
 
 [project.scripts]

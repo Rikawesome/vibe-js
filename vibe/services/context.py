@@ -59,3 +59,44 @@ def find_checks_by_keywords(query: str):
 def find_check_by_keywords(query: str):
     matches = find_checks_by_keywords(query)
     return matches[0] if matches else None
+import re
+
+
+import re
+
+
+def extract_file_paths(text: str):
+    patterns = [
+        r"`([^`]+\.(py|js|html|css|json|toml|txt|md))`",
+        r"([\w./\\-]+\.(py|js|html|css|json|toml|txt|md))",
+    ]
+
+    seen = set()
+    files = []
+
+    for pattern in patterns:
+        for match in re.findall(pattern, text):
+            file_path = match[0] if isinstance(match, tuple) else match
+            normalized = file_path.replace("\\", "/").strip()
+
+            if normalized not in seen:
+                seen.add(normalized)
+                files.append(file_path.strip())
+
+    return files
+
+
+
+
+def extract_relevance_scores(text: str):
+    scores = {}
+
+    pattern = r"-\s+(.+?):\s+([0-9.]+)"
+
+    for file_path, score_text in re.findall(pattern, text):
+        try:
+            scores[file_path.strip()] = float(score_text)
+        except ValueError:
+            continue
+
+    return scores
