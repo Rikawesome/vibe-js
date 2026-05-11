@@ -50,31 +50,124 @@ def find_score_for_file(scores: dict, file_path: str):
 
     return 0.3
 
+def extract_complaint_words(complaint: str):
+    stop_words = {
+        "this", "that", "with", "from", "when", "what",
+        "where", "after", "before", "into", "have",
+        "does", "dont", "doesnt", "isnt", "cant",
+        "could", "would", "should", "sometimes",
+        "still", "just", "like", "the", "and", "but",
+    }
+
+    words = []
+
+    for raw in complaint.replace("_", " ").replace("-", " ").split():
+        word = "".join(char for char in raw.lower() if char.isalnum())
+
+        if len(word) < 4:
+            continue
+
+        if word in stop_words:
+            continue
+
+        words.append(word)
+
+    return set(words)
+
+
 def find_relevant_symbols(code: str, complaint: str):
-    words = [
-        word.lower()
-        for word in complaint.replace("_", " ").replace("-", " ").split()
-        if len(word) >= 4
-    ]
+    complaint_words = extract_complaint_words(complaint)
 
-    symbols = set(words)
+    baseline_keywords = {
+        "error",
+        "fetch",
+        "api",
+        "route",
+        "onclick",
+        "addeventlistener",
+        "submit",
+        "click",
+        "input",
+        "form",
+        "async",
+        "await",
+        "function",
+        "class",
+        "def",
+        "import",
+        "router",
+        "response",
+        "json",
+        "blob",
+        "render",
+        "redirect",
+        "token",
+        "auth",
+    }
 
-    if "audio" in symbols or "autoplay" in symbols or "tts" in symbols:
-        symbols.update([
-            "audio",
-            "tts",
-            "speech",
-            "text_to_speech",
-            "stream-audio",
-            "speak",
-            "blob",
-            "play",
-            "currentAudio",
-            "edge_tts",
-        ])
+    return complaint_words | baseline_keywords
+def get_symbol_ranges_for_file(context: dict, file_path: str):
+    symbols = context.get("project_symbols", [])
+    complaint_words = extract_complaint_words(
+        context.get("complaint", "")
+    )
 
-    return symbols
-def build_smart_context(code: str, file_path: str, complaint: str):
+    normalized_file = file_path.replace("\\", "/").strip().lower()
+    matched_ranges = []
+
+    for symbol in symbols:
+        symbol_file = symbol.get("file_path", "")
+        normalized_symbol_file = (
+            symbol_file.replace("\\", "/").strip().lower()
+        )
+
+        if not (
+            normalized_file.endswith(normalized_symbol_file)
+            or normalized_symbol_file.endswith(normalized_file)
+        ):
+            continue
+
+        symbol_name = str(symbol.get("symbol", "")).lower()
+        symbol_type = str(symbol.get("type", "")).lower()
+        symbol_meta = str(symbol.get("meta", "")).lower()
+        searchable = f"{symbol_name} {symbol_type} {symbol_meta} {normalized_symbol_file}"
+
+        score = 0
+
+        for word in complaint_words:
+            if word in searchable:
+                score += 3
+
+        if symbol_type in {
+            "route",
+            "fetch",
+            "event",
+            "dom_selector",
+            "function",
+            "class",
+        }:
+            score += 1
+
+        # Keep useful structural symbols, but prioritize complaint matches.
+        if score <= 0:
+            continue
+
+        matched_ranges.append({
+            "symbol": symbol.get("symbol", ""),
+            "type": symbol.get("type", ""),
+            "start_line": symbol.get("start_line", 1),
+            "end_line": symbol.get("end_line", 1),
+            "score": score,
+        })
+
+    matched_ranges.sort(
+        key=lambda item: item.get("score", 0),
+        reverse=True,
+    )
+
+    return matched_ranges[:12]
+
+def build_smart_context(code: str, file_path: str, complaint: str, symbol_ranges=None):
     if len(code) <= MAX_FILE_CHARS:
         return code
 
@@ -113,6 +206,11 @@ def build_smart_context(code: str, file_path: str, complaint: str):
 
     lines = code.splitlines()
     selected_ranges = []
+    if symbol_ranges:
+        for symbol in symbol_ranges:
+            start = max(0, int(symbol["start_line"]) - 8)
+            end = min(len(lines), int(symbol["end_line"]) + 12)
+            selected_ranges.append((start, end))
 
     for index, line in enumerate(lines):
         line_lower = line.lower()
@@ -397,10 +495,16 @@ def check(files: list[str] = typer.Argument(None)):
             console.print(f"[red]{error}[/red]")
             continue
 
+        symbol_ranges = get_symbol_ranges_for_file(
+            context,
+            str(resolved),
+        )
+
         smart_code = build_smart_context(
             code,
             str(resolved),
             context.get("complaint", ""),
+            symbol_ranges=symbol_ranges,
         )
 
         console.print(f"[cyan]Loaded:[/cyan] {resolved}")

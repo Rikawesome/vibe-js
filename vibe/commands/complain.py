@@ -5,6 +5,10 @@ from vibe.prompts.prompts import COMPLAIN_PROMPT
 from vibe.services.ai import ask_ai
 from vibe.services.tree import build_tree
 from vibe.services.context import save_context, extract_file_paths
+from vibe.services.project_index import (
+    build_project_index,
+    format_project_index,
+)
 
 console = Console()
 
@@ -44,12 +48,17 @@ def complain():
 
     try:
         tree = build_tree(".", max_depth=3)
+        console.print("[cyan]Indexing project symbols...[/cyan]")
+
+        project_symbols = build_project_index(".")
+        project_index = format_project_index(project_symbols)
 
         answer = ask_ai(
             COMPLAIN_PROMPT.format(
                 complaint=complaint,
                 logs=logs_text or "No logs provided.",
                 tree=tree,
+                project_index=project_index,
             )
         )
 
@@ -60,6 +69,8 @@ def complain():
             "logs": logs_text,
             "tree": tree,
             "suggested_files": suggested_files,
+            "project_symbols": project_symbols,
+            "project_index": project_index,
         })
 
         console.print(

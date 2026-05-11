@@ -28,7 +28,10 @@ def should_skip(path: Path):
 
 def read_lines(path: Path):
     try:
-        return path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        return path.read_text(
+            encoding="utf-8",
+            errors="ignore",
+        ).splitlines()
     except Exception:
         return []
 
@@ -39,7 +42,10 @@ def detect_python_symbol(line: str):
     patterns = [
         ("function", r"^(async\s+def|def)\s+([a-zA-Z_][\w]*)"),
         ("class", r"^class\s+([a-zA-Z_][\w]*)"),
-        ("route", r"@(?:router|app)\.(get|post|put|delete|patch)\(['\"]([^'\"]+)['\"]\)"),
+        (
+            "route",
+            r"@(?:router|app)\.(get|post|put|delete|patch)\(['\"]([^'\"]+)['\"]\)",
+        ),
     ]
 
     for symbol_type, pattern in patterns:
@@ -55,7 +61,11 @@ def detect_python_symbol(line: str):
 
             return {
                 "type": symbol_type,
-                "name": match.group(2) if symbol_type == "function" else match.group(1),
+                "name": (
+                    match.group(2)
+                    if symbol_type == "function"
+                    else match.group(1)
+                ),
                 "meta": "",
             }
 
@@ -67,30 +77,56 @@ def detect_js_symbol(line: str):
 
     patterns = [
         ("function", r"^function\s+([a-zA-Z_$][\w$]*)"),
-        ("function", r"^(?:const|let|var)\s+([a-zA-Z_$][\w$]*)\s*=\s*(?:async\s*)?\("),
+        (
+            "function",
+            r"^(?:const|let|var)\s+([a-zA-Z_$][\w$]*)\s*=\s*(?:async\s*)?\(",
+        ),
         ("fetch", r"fetch\(\s*[`'\"]([^`'\"]+)"),
+        ("network", r"fetch\(\s*[`'\"]([^`'\"]+)"),
         ("dom_selector", r"getElementById\(['\"]([^'\"]+)['\"]\)"),
         ("dom_selector", r"querySelector\(['\"]([^'\"]+)['\"]\)"),
         ("event", r"\.addEventListener\(['\"]([^'\"]+)['\"]"),
         ("event", r"\.onclick\s*="),
+
+        # Generic media / browser lifecycle symbols
+        ("media", r"new\s+Audio\s*\("),
+        ("media", r"\.play\s*\("),
+        ("media", r"\.pause\s*\("),
+        ("media", r"\.blob\s*\("),
+        ("media", r"createObjectURL\s*\("),
+        ("media", r"\.src\s*="),
+        ("media", r"AudioContext\s*\("),
+
+        # Generic browser state symbols
+        ("storage", r"localStorage\."),
+        ("storage", r"sessionStorage\."),
     ]
 
     for symbol_type, pattern in patterns:
         match = re.search(pattern, stripped)
 
-        if match:
-            if symbol_type == "event" and ".onclick" in stripped:
-                return {
-                    "type": "event",
-                    "name": "onclick",
-                    "meta": stripped[:120],
-                }
+        if not match:
+            continue
 
+        if symbol_type == "event" and ".onclick" in stripped:
+            return {
+                "type": "event",
+                "name": "onclick",
+                "meta": stripped[:120],
+            }
+
+        if symbol_type in {"media", "storage"}:
             return {
                 "type": symbol_type,
-                "name": match.group(1),
+                "name": stripped[:100],
                 "meta": "",
             }
+
+        return {
+            "type": symbol_type,
+            "name": match.group(1),
+            "meta": "",
+        }
 
     return None
 
@@ -104,6 +140,30 @@ def detect_html_symbol(line: str):
         return {
             "type": "html_id",
             "name": id_match.group(1),
+            "meta": "",
+        }
+
+    class_match = re.search(r'class=["\']([^"\']+)["\']', stripped)
+
+    if class_match:
+        return {
+            "type": "html_class",
+            "name": class_match.group(1),
+            "meta": "",
+        }
+
+    return None
+
+
+def detect_css_symbol(line: str):
+    stripped = line.strip()
+
+    match = re.match(r"([.#][a-zA-Z_][\w-]*)\s*\{", stripped)
+
+    if match:
+        return {
+            "type": "css_selector",
+            "name": match.group(1),
             "meta": "",
         }
 
@@ -122,24 +182,34 @@ def detect_symbol(path: Path, line: str):
     if suffix == ".html":
         return detect_html_symbol(line)
 
+    if suffix == ".css":
+        return detect_css_symbol(line)
+
     return None
 
 
 def estimate_symbol_range(lines, start_index):
     end_index = min(len(lines), start_index + 40)
 
-    for index in range(start_index + 1, min(len(lines), start_index + 120)):
+    for index in range(
+        start_index + 1,
+        min(len(lines), start_index + 120),
+    ):
         line = lines[index]
 
         if line and not line.startswith((" ", "\t")):
+            stripped = line.strip()
+
             if (
-                line.strip().startswith("def ")
-                or line.strip().startswith("async def ")
-                or line.strip().startswith("class ")
-                or line.strip().startswith("function ")
-                or line.strip().startswith("const ")
-                or line.strip().startswith("let ")
-                or line.strip().startswith("var ")
+                stripped.startswith("def ")
+                or stripped.startswith("async def ")
+                or stripped.startswith("class ")
+                or stripped.startswith("function ")
+                or stripped.startswith("const ")
+                or stripped.startswith("let ")
+                or stripped.startswith("var ")
+                or stripped.startswith("@router.")
+                or stripped.startswith("@app.")
             ):
                 end_index = index
                 break
@@ -169,7 +239,10 @@ def build_project_index(root="."):
             if not symbol:
                 continue
 
-            start_line, end_line = estimate_symbol_range(lines, index)
+            start_line, end_line = estimate_symbol_range(
+                lines,
+                index,
+            )
 
             symbols.append({
                 "file_path": str(path),
@@ -183,7 +256,7 @@ def build_project_index(root="."):
     return symbols
 
 
-def format_project_index(symbols, limit=80):
+def format_project_index(symbols, limit=120):
     lines = []
 
     for item in symbols[:limit]:
