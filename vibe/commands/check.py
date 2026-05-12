@@ -3,6 +3,7 @@ from rich.panel import Panel
 import typer
 import re
 from vibe.prompts.prompts import MULTI_CHECK_PROMPT
+from vibe.services import files
 from vibe.services.ai import ask_ai
 from vibe.services.context import (
     load_context,
@@ -11,6 +12,7 @@ from vibe.services.context import (
 )
 from vibe.services.files import read_text_file
 from vibe.services.resolver import resolve_file
+from vibe.services.cache import make_hash, get_cache, set_cache
 
 console = Console()
 
@@ -438,6 +440,28 @@ def build_flow_map(files):
 
     return "\n".join(flow_lines)
 
+def get_related_files(context, target_files):
+    graph = context.get("relationship_graph", {})
+    links = graph.get("fetch_to_route", [])
+
+    related = set()
+
+    normalized_targets = {
+        file.replace("\\", "/").strip().lower()
+        for file in target_files
+    }
+
+    for link in links:
+        frontend = link["frontend_file"].replace("\\", "/").lower()
+        backend = link["backend_file"].replace("\\", "/").lower()
+
+        if frontend in normalized_targets:
+            related.add(link["backend_file"])
+
+        if backend in normalized_targets:
+            related.add(link["frontend_file"])
+
+    return list(related)
 
 def check(files: list[str] = typer.Argument(None)):
     context = load_context()
@@ -463,7 +487,12 @@ def check(files: list[str] = typer.Argument(None)):
             return
 
     files = dedupe_files(files)
+    related_files = get_related_files(context, files)
 
+    for related in related_files:
+        if related not in files:
+            files.append(related)
+    files = dedupe_files(files) 
     loaded_files = []
     seen_resolved_paths = set()
 
@@ -535,15 +564,31 @@ def check(files: list[str] = typer.Argument(None)):
     )
 
     try:
-        answer = ask_ai(
-            MULTI_CHECK_PROMPT.format(
-                complaint=context.get("complaint", ""),
-                logs=context.get("logs", "No logs provided."),
-                tree=context.get("tree", ""),
-                flow_map=flow_map,
-                files=files_blob,
-            )
+        cache_key = make_hash(
+            "check",
+            context.get("complaint", ""),
+            files_blob,
+            flow_map,
         )
+
+        cached = get_cache(cache_key)
+
+        if cached:
+            answer = cached.get("answer")
+            console.print("[green]Using cached check result.[/green]")
+        else:
+            answer = ask_ai(
+                MULTI_CHECK_PROMPT.format(
+                    complaint=context.get("complaint", ""),
+                    logs=context.get("logs", "No logs provided."),
+                    tree=context.get("tree", ""),
+                    flow_map=flow_map,
+                    files=files_blob,
+                )
+            )
+
+            if answer and not answer.startswith("AI Error:"):
+                set_cache(cache_key, {"answer": answer})
 
         if not answer or answer.startswith("AI Error:"):
             console.print(
@@ -553,7 +598,6 @@ def check(files: list[str] = typer.Argument(None)):
                     border_style="red",
                 )
             )
-
             console.print("[yellow]Check results were not saved.[/yellow]")
             return
 

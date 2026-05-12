@@ -1,74 +1,82 @@
-from pathlib import Path
 import json
+import re
+from pathlib import Path
 
-VIBE_DIR = Path(".vibe")
-CONTEXT_FILE = VIBE_DIR / "context.json"
 
-
-def save_context(data: dict):
-    VIBE_DIR.mkdir(exist_ok=True)
-
-    with open(CONTEXT_FILE, "w", encoding="utf-8") as file:
-        json.dump(data, file, indent=4)
+CONTEXT_DIR = Path(".vibe")
+CONTEXT_FILE = CONTEXT_DIR / "context.json"
 
 
 def load_context():
     if not CONTEXT_FILE.exists():
-        return None
+        return {}
 
-    with open(CONTEXT_FILE, "r", encoding="utf-8") as file:
-        return json.load(file)
+    try:
+        return json.loads(CONTEXT_FILE.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def save_context(data: dict):
+    CONTEXT_DIR.mkdir(exist_ok=True)
+    CONTEXT_FILE.write_text(
+        json.dumps(data, indent=2),
+        encoding="utf-8",
+    )
+
+
 def update_context(updates: dict):
-    data = load_context() or {}
-    data.update(updates)
-    save_context(data)
-def find_checks_by_keywords(query: str):
-    data = load_context() or {}
-    checks = data.get("checks", [])
-
-    if not checks:
-        last_check = data.get("last_check")
-        if last_check:
-            checks = [last_check]
-
-    words = [
-        word.lower()
-        for word in query.split()
-        if len(word) > 2
-    ]
-
-    matched = []
-
-    for check in checks:
-        searchable = " ".join([
-            check.get("complaint", ""),
-            check.get("file_path", ""),
-            check.get("analysis", ""),
-        ]).lower()
-
-        score = sum(1 for word in words if word in searchable)
-
-        if score > 0:
-            matched.append((score, check))
-
-    matched.sort(key=lambda item: item[0], reverse=True)
-
-    return [check for score, check in matched]
+    context = load_context()
+    context.update(updates)
+    save_context(context)
 
 
-def find_check_by_keywords(query: str):
-    matches = find_checks_by_keywords(query)
-    return matches[0] if matches else None
-import re
+def is_probably_file(path: str):
+    path = path.strip().strip("`").strip()
 
+    if not path:
+        return False
 
-import re
+    invalid_starts = (
+        "python ",
+        "pip ",
+        "npm ",
+        "node ",
+        "curl ",
+        "uvicorn ",
+        "flask ",
+        "source ",
+        "export ",
+    )
+
+    lowered = path.lower()
+
+    if lowered.startswith(invalid_starts):
+        return False
+
+    if "://" in path:
+        return False
+
+    valid_extensions = (
+        ".py",
+        ".js",
+        ".html",
+        ".css",
+        ".json",
+        ".md",
+        ".txt",
+        ".toml",
+        ".yaml",
+        ".yml",
+    )
+
+    return lowered.endswith(valid_extensions)
 
 
 def extract_file_paths(text: str):
     patterns = [
-        r"`([^`]+\.(py|js|html|css|json|toml|txt|md))`",
-        r"([\w./\\-]+\.(py|js|html|css|json|toml|txt|md))",
+        r"`([^`]+\.(py|js|html|css|json|toml|txt|md|yaml|yml))`",
+        r"([\w./\\-]+\.(py|js|html|css|json|toml|txt|md|yaml|yml))",
     ]
 
     seen = set()
@@ -77,15 +85,18 @@ def extract_file_paths(text: str):
     for pattern in patterns:
         for match in re.findall(pattern, text):
             file_path = match[0] if isinstance(match, tuple) else match
-            normalized = file_path.replace("\\", "/").strip()
+            cleaned = file_path.replace("\\", "/").strip()
 
-            if normalized not in seen:
-                seen.add(normalized)
-                files.append(file_path.strip())
+            if not is_probably_file(cleaned):
+                continue
+
+            if cleaned in seen:
+                continue
+
+            seen.add(cleaned)
+            files.append(cleaned)
 
     return files
-
-
 
 
 def extract_relevance_scores(text: str):
@@ -95,8 +106,40 @@ def extract_relevance_scores(text: str):
 
     for file_path, score_text in re.findall(pattern, text):
         try:
-            scores[file_path.strip()] = float(score_text)
+            cleaned = file_path.strip().strip("`")
+            scores[cleaned] = float(score_text)
         except ValueError:
             continue
 
     return scores
+
+
+def find_checks_by_keywords(target: str):
+    context = load_context()
+    checks = context.get("checks", [])
+
+    if not checks:
+        return []
+
+    target_words = {
+        word.lower()
+        for word in re.findall(r"[a-zA-Z0-9_]+", target)
+        if len(word) >= 3
+    }
+
+    if not target_words:
+        return checks
+
+    matched = []
+
+    for check in checks:
+        blob = " ".join([
+            str(check.get("complaint", "")),
+            str(check.get("file_path", "")),
+            str(check.get("analysis", "")),
+        ]).lower()
+
+        if any(word in blob for word in target_words):
+            matched.append(check)
+
+    return matched

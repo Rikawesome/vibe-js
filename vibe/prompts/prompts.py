@@ -324,3 +324,45 @@ or
 INVALID:
 <short reason>
 """
+
+PATCH_REPAIR_PROMPT = """
+You are Vibe JS, a careful AI patch repair assistant.
+
+The previous patch was rejected.
+
+Complaint:
+{complaint}
+
+File path:
+{file_path}
+
+Original patch:
+{patch}
+
+Validation rejection reason:
+{reason}
+
+Current file contents:
+{code}
+
+Return a corrected patch in this EXACT format:
+
+--- PATCH ---
+FIND:
+<exact old code from THIS target file only>
+
+REPLACE:
+<new code>
+--- END PATCH ---
+
+If no safe patch can be made, return exactly:
+NO_PATCHES
+
+Rules:
+- Only patch the target file.
+- Never invent DOM elements, routes, functions, imports, or variables.
+- FIND must match exact text from the target file.
+- Keep patches small.
+- Do not include explanations.
+- Do not use markdown fences.
+"""

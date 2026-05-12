@@ -9,6 +9,7 @@ from vibe.services.project_index import (
     build_project_index,
     format_project_index,
 )
+from vibe.services.graph import build_relationship_graph
 
 console = Console()
 
@@ -52,6 +53,7 @@ def complain():
 
         project_symbols = build_project_index(".")
         project_index = format_project_index(project_symbols)
+        relationship_graph = build_relationship_graph(project_symbols)
 
         answer = ask_ai(
             COMPLAIN_PROMPT.format(
@@ -71,6 +73,7 @@ def complain():
             "suggested_files": suggested_files,
             "project_symbols": project_symbols,
             "project_index": project_index,
+            "relationship_graph": relationship_graph,
         })
 
         console.print(

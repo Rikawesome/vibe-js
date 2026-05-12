@@ -6,6 +6,7 @@ from vibe.prompts.prompts import (
     FIX_PROMPT,
     PATCH_FIX_PROMPT,
     PATCH_VALIDATE_PROMPT,
+    PATCH_REPAIR_PROMPT,
 )
 from vibe.services.ai import ask_ai
 from vibe.services.context import (
@@ -18,8 +19,67 @@ from vibe.services.files import (
     backup_file,
     apply_patches,
 )
+from vibe.services.validators import validate_code
 
 console = Console()
+
+
+def validate_patch_with_ai(
+    selected_check,
+    context,
+    file,
+    patch_response,
+    improved_code,
+):
+    validation = ask_ai(
+        PATCH_VALIDATE_PROMPT.format(
+            complaint=selected_check.get(
+                "complaint",
+                context.get("complaint", ""),
+            ),
+            file_path=file,
+            patch=patch_response,
+            code=improved_code,
+        )
+    )
+
+    if not validation or validation.startswith("AI Error:"):
+        return False, validation or "No validation response."
+
+    if validation.strip().startswith("VALID"):
+        return True, validation
+
+    return False, validation
+
+
+def repair_patch_once(
+    selected_check,
+    context,
+    file,
+    original_code,
+    patch_response,
+    rejection_reason,
+):
+    repaired_patch = ask_ai(
+        PATCH_REPAIR_PROMPT.format(
+            complaint=selected_check.get(
+                "complaint",
+                context.get("complaint", ""),
+            ),
+            file_path=file,
+            patch=patch_response,
+            reason=rejection_reason,
+            code=original_code,
+        )
+    )
+
+    if repaired_patch and repaired_patch.strip() == "NO_PATCHES":
+        return None, "No safe repaired patch available."
+
+    if not repaired_patch or repaired_patch.startswith("AI Error:"):
+        return None, repaired_patch or "Patch repair failed."
+
+    return repaired_patch, None
 
 
 def fix_one(file: str, selected_check, context, write: bool):
@@ -57,24 +117,6 @@ def fix_one(file: str, selected_check, context, write: bool):
                 return
 
             improved_code, applied, failed = apply_patches(code, patch_response)
-            validation = ask_ai(
-                PATCH_VALIDATE_PROMPT.format(
-                    complaint=selected_check.get("complaint", context.get("complaint", "")),
-                    file_path=selected_check["file_path"],
-                    patch=patch_response,
-                    code=improved_code,
-                )
-            )
-
-            if not validation or validation.startswith("AI Error:"):
-                console.print(f"[red]Validation failed:[/red] {validation}")
-                console.print("[yellow]File was not changed.[/yellow]")
-                return
-
-            if not validation.strip().startswith("VALID"):
-                console.print(f"[red]Patch rejected:[/red] {validation}")
-                console.print("[yellow]File was not changed.[/yellow]")
-                return
 
             console.print(f"[green]Applied {applied} patch(es).[/green]")
 
@@ -83,6 +125,99 @@ def fix_one(file: str, selected_check, context, write: bool):
                     f"[yellow]{len(failed)} patch(es) failed to match exactly.[/yellow]"
                 )
 
+            valid, validation_message = validate_code(file, improved_code)
+
+            if not valid:
+                console.print(
+                    f"[red]Local validation failed:[/red] {validation_message}"
+                )
+                console.print("[yellow]Trying one repair attempt...[/yellow]")
+
+                repaired_patch, repair_error = repair_patch_once(
+                    selected_check,
+                    context,
+                    file,
+                    code,
+                    patch_response,
+                    validation_message,
+                )
+
+                if repair_error:
+                    console.print(f"[red]Patch repair failed:[/red] {repair_error}")
+                    console.print("[yellow]File was not changed.[/yellow]")
+                    return
+
+                patch_response = repaired_patch
+                improved_code, applied, failed = apply_patches(code, patch_response)
+
+                valid, validation_message = validate_code(file, improved_code)
+
+                if not valid:
+                    console.print(
+                        f"[red]Local validation failed after repair:[/red] "
+                        f"{validation_message}"
+                    )
+                    console.print("[yellow]File was not changed.[/yellow]")
+                    return
+
+            console.print(f"[green]{validation_message}[/green]")
+
+            valid_ai, ai_validation = validate_patch_with_ai(
+                selected_check,
+                context,
+                file,
+                patch_response,
+                improved_code,
+            )
+
+            if not valid_ai:
+                console.print(f"[yellow]Patch rejected:[/yellow] {ai_validation}")
+                console.print("[cyan]Trying one repair attempt...[/cyan]")
+
+                repaired_patch, repair_error = repair_patch_once(
+                    selected_check,
+                    context,
+                    file,
+                    code,
+                    patch_response,
+                    ai_validation,
+                )
+
+                if repair_error:
+                    console.print(f"[red]Patch repair failed:[/red] {repair_error}")
+                    console.print("[yellow]File was not changed.[/yellow]")
+                    return
+
+                patch_response = repaired_patch
+                improved_code, applied, failed = apply_patches(code, patch_response)
+
+                valid, validation_message = validate_code(file, improved_code)
+
+                if not valid:
+                    console.print(
+                        f"[red]Local validation failed after repair:[/red] "
+                        f"{validation_message}"
+                    )
+                    console.print("[yellow]File was not changed.[/yellow]")
+                    return
+
+                valid_ai, ai_validation = validate_patch_with_ai(
+                    selected_check,
+                    context,
+                    file,
+                    patch_response,
+                    improved_code,
+                )
+
+                if not valid_ai:
+                    console.print(
+                        f"[red]Repaired patch rejected:[/red] {ai_validation}"
+                    )
+                    console.print("[yellow]File was not changed.[/yellow]")
+                    return
+
+            console.print("[green]AI validation passed.[/green]")
+
         else:
             improved_code = ask_ai(FIX_PROMPT.format(code=code))
 
@@ -90,6 +225,17 @@ def fix_one(file: str, selected_check, context, write: bool):
                 console.print(f"[red]AI failed:[/red] {improved_code}")
                 console.print("[yellow]File was not changed.[/yellow]")
                 return
+
+            valid, validation_message = validate_code(file, improved_code)
+
+            if not valid:
+                console.print(
+                    f"[red]Local validation failed:[/red] {validation_message}"
+                )
+                console.print("[yellow]File was not changed.[/yellow]")
+                return
+
+            console.print(f"[green]{validation_message}[/green]")
 
         if write:
             backup_path = backup_file(file)
@@ -103,6 +249,7 @@ def fix_one(file: str, selected_check, context, write: bool):
                 f"[green]Updated:[/green] {file}\n"
                 f"Backup created: {backup_path}"
             )
+
         else:
             preview_content = patch_response if selected_check else improved_code
 
@@ -170,6 +317,7 @@ def fix(
                     f"{check['file_path']}"
                 )
                 continue
+
             console.print(f"[cyan]Fixing from check:[/cyan] {check['file_path']}")
             fix_one(check["file_path"], check, context or {}, write)
 

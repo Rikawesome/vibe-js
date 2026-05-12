@@ -13,6 +13,7 @@ from vibe.commands.check import check
 from vibe.commands.version import version
 from vibe.commands.sync import sync
 from vibe.commands.setup import setup
+from vibe.commands.doctor import doctor
 app = typer.Typer()
 
 commands = [
