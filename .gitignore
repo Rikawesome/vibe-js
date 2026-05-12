@@ -6,4 +6,4 @@ __pycache__/
 *.bak
 report.json
 my-api/
-my-ai-app/
+my-ai-app/.env
