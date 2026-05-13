@@ -1,4 +1,5 @@
 import typer
+from vibe.commands.run import run
 
 from vibe.commands.blame import blame
 from vibe.commands.explain import explain
@@ -30,6 +31,7 @@ commands = [
     version,
     sync,
     setup,
+    run,
 ]
 
 for command in commands:
